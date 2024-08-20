@@ -1,0 +1,367 @@
+---
+title: "COVID19 Final Project"
+author: "Zuhair Allahrakha"
+date: 'Aug 20, 2024'
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Import Libraries
+
+```{r library, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+```
+
+## Introduction
+
+### Project Purpose
+
+This is the Final Project for the course DTSA 5301: Data Science as a Field. We are demonstrating our ability to complete all steps in the data science process by creating a reproducible report on the COVID19 data set from the John Hopkins GitHub site.
+
+### Question of Interest
+
+
+- Which Wisconsin county has the highest COVID19 mortality rate and which Wisconsin county has the lowest COVID19 mortality rate?
+
+- Can we predict future COVID19 cases and deaths in Wisconsin with a Linear Regression Model?
+
+
+## Project Step 1: Describe and Import the Dataset
+
+
+### Data Description
+
+__CSSE COVID19 Time Series Data__
+
+Two of the datasets are time series tables for the US confirmed cases and deaths, reported at the county level.
+
+The other two datasets are for the global confirmed cases and deaths. Australia, Canada, and China are reported at the province/state level. Dependencies of the Netherlands, the UK, France and Denmark are listed under the province/state level. The US and other countries are at the country level.
+
+The data is updated once a day around 23:59 (UTC).
+
+
+__Source__ https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series
+
+
+### Import Datasets
+
+```{r setup_urls, message=FALSE, warnings=FALSE}
+# All files begin with this string.
+url_in <- ("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/")
+
+# Vector containing four file names.
+file_names <- 
+  c("time_series_covid19_confirmed_global.csv",
+  "time_series_covid19_deaths_global.csv",
+  "time_series_covid19_confirmed_US.csv",
+  "time_series_covid19_deaths_US.csv")
+
+# String concatenate url_in and each of the file names.
+urls <- str_c(url_in, file_names)
+```
+
+```{r import_data, message=FALSE, warnings=FALSE}
+# Store each dataset in a variable.
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+```
+
+## Step 2: Tidy and Transform Data
+
+- We want our variables to have "R friendly" syntax.
+- Each date should be on a separate row.
+- Dates should be converted into date objects.
+- Remove unnecessary columns.
+- Handle any missing data.
+- Join global cases and global deaths per date.
+- Join US cases and US deaths per date.
+
+### Tidy Global Data
+```{r tidy_global_data}
+global_cases <- global_cases %>%
+  pivot_longer(cols =
+                 -c('Province/State',
+                    'Country/Region', Lat, Long),
+               names_to = "date",
+               values_to = "cases")
+```
+
+```{r tidy_global_deaths}
+global_deaths <- global_deaths %>%
+  pivot_longer(cols =
+                 -c('Province/State',
+                    'Country/Region', Lat, Long),
+               names_to = "date",
+               values_to = "deaths")
+```
+
+```{r join_global_data}
+global <- global_cases %>%
+  full_join(global_deaths) %>%
+  rename(Country_Region = 'Country/Region',
+         Province_State = 'Province/State') %>%
+  mutate(date = mdy(date))
+```
+
+
+### Summary of Global Data (Descriptive Statistics)
+
+```{r global_summary}
+summary(global)
+```
+
+
+### Tidy US Data
+```{r tidy_US_cases}
+US_cases <- US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases")  %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select (-c(Lat, Long_))
+```
+
+```{r tidy_US_deaths}
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths")  %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select (-c(Lat, Long_))
+```
+
+```{r join_US_data}
+US <- US_cases %>%
+  full_join(US_deaths)
+```
+
+
+### Summary of US Data (Descriptive Statistics)
+
+```{r US_summary}
+summary(US)
+```
+
+
+### Row Description (US Data)
+
+- Each __row__ in the US table is a date.
+
+
+### Column Description (US Data)
+
+- __Admin2__: County name
+- __Province_State__: State name
+- __Country_Region__: US
+- __Combined_Key__: Puts together county and state
+- __date__: Date in year/month/day format
+- __cases__: Total number of COVID19 cases
+- __Population__: Population of the County
+- __deaths__: Total number of COVID19 related deaths
+
+
+
+## Step 3: Add Visualizations and Analysis
+
+I am focusing my research on Wisconsin so I will create four new dataframes with only Wisconsin data.
+
+```{r wisc_df}
+
+# Filter US dataset for only the rows where Province_State is Wisconsin.
+wisc <- US %>%
+  filter(Province_State == "Wisconsin", cases > 0) %>%
+  group_by(date, Admin2)
+
+# Group Wisconsin data by county and add mortality rate column.
+wisc_counties <- wisc %>%
+  group_by(Admin2, date) %>%
+  mutate(mortality_rate = deaths / cases) %>%
+  select(Admin2, date, cases, deaths, Population, mortality_rate)
+
+# Sum all Wisconsin county cases, deaths, and populations.
+wisc_totals <- wisc %>%
+  group_by(date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>%
+  select(date, cases, deaths, Population) %>%
+  ungroup()
+
+# Create a dataframe that contains the most recent statistics for each Wisconsin county.
+# Updated April 22, 2022.
+current_counties <- wisc_counties %>% 
+  filter(date == "2022-04-22") %>%
+  group_by(Admin2) %>%
+  mutate(county_mortality_rate = deaths/cases) %>%
+  select(date, Admin2, cases, deaths, Population, county_mortality_rate) %>%
+  ungroup()
+
+```
+
+I will now analyze these datasets to find information relevant to my question of interest.
+
+```{r analyze_wisc}
+
+# Total Wisconsin cases to date.
+max(wisc_totals$cases)
+
+# Total Wisconsin deaths to date.
+max(wisc_totals$deaths)
+
+# Wisconsin mortality rate:
+max(wisc_totals$deaths) / max(wisc_totals$cases)
+
+# Wisconsin county with the highest mortality rate:
+current_counties %>% slice_max(county_mortality_rate)
+
+# Wisconsin county with the lowest mortality rate:
+current_counties %>% slice_min(county_mortality_rate)
+
+```
+
+Wisconsin has had a total of __1,601,444__ cases of COVID19.
+
+Wisconsin has had a total of __14,403__ COVID19 related deaths.
+
+Wisconsin's mortality rate is __0.009%__.
+
+__Iron county__ has the __highest mortality rate__ in Wisconsin at __3.2%__.
+
+__Buffalo county__ has the __lowest mortality rate__ in Wisconsin at __0.0034%__.
+
+### Wisconsin County with the Highest Mortality Rate: Iron County
+
+
+```{r iron_county}
+
+# Create a new dataframe for Iron County and add columns for daily new cases and deaths.
+iron_county <- wisc_counties %>%
+  filter(Admin2 == "Iron") %>%
+  group_by(Admin2) %>%
+  mutate(new_cases = cases - lag(cases), new_deaths = deaths - lag(deaths)) %>%
+  select(date, Admin2, cases, deaths, Population, new_cases, new_deaths)
+
+iron_county <- iron_county %>%
+  filter(new_cases >= 0, new_deaths >=0)
+
+ggplot(iron_county, aes(x=date)) +
+  geom_line(aes(y = new_cases), color="steelblue") +
+  scale_x_date(date_labels = "%Y %b %d", date_breaks = "4 month") +
+  theme_bw() +
+  labs(x = "Dates",
+       y = "New COVID19 Cases",
+       title = "Iron County New COVID19 Cases - Time Series")
+
+ggplot(iron_county, aes(x=date)) +
+  geom_line(aes(y = new_deaths), color = "dark red") +
+    scale_x_date(date_labels = "%Y %b %d", date_breaks = "4 month") +
+  theme_bw() +
+  labs(x = "Dates",
+       y = "New COVID19 Deaths",
+       title = "Iron County New COVID19 Deaths - Time Series")
+
+```
+
+
+### Wisconsin County with the Lowest Mortality Rate: Buffalo County
+
+
+```{r buffalo_county}
+
+# Create a new dataframe for Iron County and add columns for daily new cases and deaths.
+buffalo_county <- wisc_counties %>%
+  filter(Admin2 == "Buffalo") %>%
+  group_by(Admin2) %>%
+  mutate(new_cases = cases - lag(cases), new_deaths = deaths - lag(deaths)) %>%
+  select(date, Admin2, cases, deaths, Population, new_cases, new_deaths)
+
+buffalo_county <- buffalo_county %>%
+  filter(new_cases >= 0, new_deaths >=0)
+
+ggplot(buffalo_county, aes(x=date)) +
+  geom_line(aes(y = new_cases), color="steelblue") +
+  scale_x_date(date_labels = "%Y %b %d", date_breaks = "4 month") +
+  theme_bw() +
+  labs(x = "Dates",
+       y = "New COVID19 Cases",
+       title = "Buffalo County New COVID19 Cases - Time Series")
+
+ggplot(buffalo_county, aes(x=date)) +
+  geom_line(aes(y = new_deaths), color = "dark red") +
+    scale_x_date(date_labels = "%Y %b %d", date_breaks = "4 month") +
+  theme_bw() +
+  labs(x = "Dates",
+       y = "New COVID19 Deaths",
+       title = "Buffalo County New COVID19 Deaths - Time Series")
+
+```
+
+### Modeling with Linear Regression
+
+My objective is to determine whether I can predict future Wisconsin COVID19 cases and deaths with a Linear Regression Model.
+
+Linear regression is a statistical model that is used to predict the value of Y based on an input X. We want to establish a linear relationship between the predictor variable (X) and the outcome variable (Y). A linear relationship is a straight line plotted on a graph. If a variable's exponent is not equal to 1, there will be a curve.
+
+
+```{r county_model}
+
+# Prepare the data set for modeling.
+wisc_county_totals <- wisc_counties %>%
+  group_by(Admin2) %>%
+  summarize(deaths = max(deaths), cases = max(cases), Population = max(Population)) %>%
+  mutate(cases_per_hundred = 100 * cases / Population, deaths_per_hundred = 100 * deaths / Population ) %>%
+  select(Admin2, cases, deaths, Population, cases_per_hundred, deaths_per_hundred)
+
+# Build the linear regression model.
+lr_model <- lm(deaths_per_hundred ~ cases_per_hundred, data = wisc_county_totals)
+
+# Display summmary for model analysis.
+summary(lr_model)
+
+```
+
+Is this model mathematically significant? 
+
+- The p-value of the individual predictor variable is 0.0261. This is less than 0.05, which means that it could be significant. 
+- The model p-value is 0.8928, which is larger than 0.05. 
+- Both p-values need to be less than 0.05 for a linear model to be statistically significant.
+
+
+__Model Observations__
+
+- This linear model is __not mathematically significant__.
+
+- There are other variables we should consider when predicting future COVID19 trends in Wisconsin.
+
+- A different model may be more suitable for this analysis.
+
+
+
+### Does this raise additional questions that you should investigate?
+
+- What are the demographics of Iron County? Does this contribute to the high mortality rate?
+- How is the data being reported in Iron County? Are we only seeing deaths for the county's citizens or are we also seeing deaths for the hospital patients in the county? It is possible that the surrounding counties are sending COVID19 positive patients to Iron County hospitals, especially if the nearby counties do not have space in their hospitals.
+- What is happening during the spikes in cases and deaths? Did the hospital do a report dump during the large spikes or is this the actual trend?
+
+
+## Step 4: Report Conclusion and Sources of Bias
+
+### Conclusion
+
+I found that Iron County has the highest mortality rate in Wisconsin and that Buffalo County has the lowest mortality rate in Wisconsin. I was not able to predict future Wisconsin COVID19 cases and deaths with a Linear Regression Model. I would choose a different dataset with more environmental factors if I wanted to continue this investigation.
+
+### Sources of Bias
+
+COVID19 has become a politically heated topic. A strong opinion on this debate could become a source of bias. I mitigated this bias by remaining objective and avoiding assumptions. I need to focus on the data, not the political climate around the pandemic. There can also be a bias in the way data is collected. This particular dataset had a lot of documentation regarding how it was collected and by which organizations. This makes me want to use this data because it is more trustworthy. There may be some confusion in how COVID19 cases were reported, but I think this is a concern with any data involving an infectious disease. It is to be expected, and we just have to work with the available data the best we can.
+
+
